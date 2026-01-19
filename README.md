@@ -2,14 +2,6 @@
 
 交互式演示 3D Gaussian Splatting 中 Front-to-Back Alpha Blending 的工作原理。
 
-## 🎬 在线演示
-
-👉 **[点击查看演示](https://ningzeliu.github.io/3dgs-alpha-blending/)**
-
-或扫描下方二维码：
-
-![QR Code](qrcode-github.png)
-
 ## 📖 内容介绍
 
 本演示详细解释了 3D Gaussian Splatting 渲染中的 Alpha Blending 步骤：
