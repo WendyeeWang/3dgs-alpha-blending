@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Gaussian Splatting - Alpha Blending 原理演示</title>
+    <meta name="description" content="交互式演示3D Gaussian Splatting中Front-to-Back Alpha Blending的工作原理">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            min-height: 100vh;
+            background: linear-gradient(180deg, #ffffff 0%, #f5f7fa 100%);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: #1a1a2e;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        /* 标题区 */
+        .header {
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #4285f4 0%, #34a853 50%, #ea4335 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 6px;
+        }
+        
+        .header h2 {
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: #5f6368;
+        }
+        
+        /* 主内容区 */
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 20px;
+        }
+        
+        @media (max-width: 900px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* 卡片样式 */
+        .card {
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            border: 1px solid #e8eaed;
+        }
+        
+        .card-title {
+            font-size: 0.8rem;
+            color: #4285f4;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: 600;
+        }
+        
+        .card-title.green { color: #34a853; }
+        
+        /* 场景可视化区 */
+        .scene-container {
+            position: relative;
+            height: 180px;
+            background: linear-gradient(180deg, #f8f9fa 0%, #e8eaed 100%);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #dadce0;
+        }
+        
+        .camera {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            text-align: center;
+        }
+        
+        .camera-icon { font-size: 1.6rem; }
+        .camera-label { font-size: 0.6rem; color: #5f6368; font-weight: 500; }
+        
+        /* 光线动画 */
+        .ray {
+            position: absolute;
+            left: 50px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 60px;
+            height: 3px;
+            background: linear-gradient(90deg, rgba(66,133,244,0.8), rgba(66,133,244,0));
+            animation: rayMove 0.8s linear infinite;
+        }
+        
+        @keyframes rayMove {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        /* 处理顺序指示 */
+        .order-indicator {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: linear-gradient(135deg, #4285f4, #34a853);
+            color: #fff;
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-size: 0.65rem;
+            font-weight: 600;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .order-indicator.visible { opacity: 1; }
+        
+        /* 高斯球体 */
+        .gaussian {
+            position: absolute;
+            top: 50%;
+            width: 55px;
+            height: 55px;
+            border-radius: 50%;
+            transform: translateY(-50%);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 0.35;
+        }
+        
+        .gaussian.active { opacity: 1; }
+        .gaussian.current {
+            opacity: 1;
+            transform: translateY(-50%) scale(1.15);
+            box-shadow: 0 0 0 3px #fff, 0 6px 20px rgba(0,0,0,0.3);
+        }
+        
+        .gaussian-1 {
+            left: 110px;
+            background: radial-gradient(circle at 30% 30%, #7aa8f7, #4285f4 55%, #2b5797);
+            z-index: 3;
+        }
+        
+        .gaussian-2 {
+            left: 190px;
+            background: radial-gradient(circle at 30% 30%, #81c784, #4caf50 55%, #2e7d32);
+            z-index: 2;
+        }
+        
+        .gaussian-3 {
+            left: 270px;
+            background: radial-gradient(circle at 30% 30%, #ef9a9a, #e64c4c 55%, #b71c1c);
+            z-index: 1;
+        }
+        
+        .gaussian-label {
+            position: absolute;
+            bottom: -28px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            white-space: nowrap;
+        }
+        
+        .gaussian-label .name {
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+        
+        .gaussian-1 .name { color: #4285f4; }
+        .gaussian-2 .name { color: #4caf50; }
+        .gaussian-3 .name { color: #e64c4c; }
+        
+        .gaussian-label .info {
+            font-size: 0.55rem;
+            color: #5f6368;
+        }
+        
+        .gaussian-number {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #dadce0;
+            color: #9aa0a6;
+            font-size: 0.65rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s;
+        }
+        
+        .gaussian.active .gaussian-number {
+            background: #4285f4;
+            color: #fff;
+        }
+        
+        /* 深度轴 */
+        .depth-axis {
+            position: absolute;
+            bottom: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.65rem;
+            color: #80868b;
+            font-weight: 500;
+        }
+        
+        .depth-line {
+            width: 140px;
+            height: 2px;
+            background: linear-gradient(90deg, #4285f4, #ea4335);
+            border-radius: 1px;
+        }
+        
+        /* 混合结果区 */
+        .result-section {
+            margin-top: 16px;
+            padding: 14px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border: 1px solid #e8eaed;
+        }
+        
+        .result-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+        }
+        
+        .color-preview {
+            width: 70px;
+            height: 70px;
+            border-radius: 10px;
+            background: #000;
+            transition: all 0.4s;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .color-label {
+            font-size: 0.7rem;
+            color: #5f6368;
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+        
+        .status-indicators {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 8px;
+        }
+        
+        .status-item {
+            flex: 1;
+            padding: 5px;
+            background: #e8eaed;
+            border-radius: 5px;
+            text-align: center;
+            font-size: 0.65rem;
+            font-weight: 600;
+            color: #9aa0a6;
+            transition: all 0.3s;
+        }
+        
+        .status-item.active {
+            color: #fff;
+        }
+        
+        .status-item.g1.active { background: #4285f4; }
+        .status-item.g2.active { background: #4caf50; }
+        .status-item.g3.active { background: #e64c4c; }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+        
+        .info-box {
+            padding: 6px 8px;
+            background: #fff;
+            border-radius: 5px;
+            font-size: 0.7rem;
+            font-family: "SF Mono", Monaco, monospace;
+        }
+        
+        .info-box .label {
+            color: #5f6368;
+            margin-bottom: 2px;
+        }
+        
+        .rgb-r { color: #ea4335; }
+        .rgb-g { color: #34a853; }
+        .rgb-b { color: #4285f4; }
+        
+        /* 公式区 */
+        .formula-box {
+            margin-top: 14px;
+            padding: 14px;
+            background: linear-gradient(135deg, rgba(66,133,244,0.08), rgba(52,168,83,0.08));
+            border-radius: 10px;
+            border: 2px solid rgba(66,133,244,0.2);
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        
+        .formula-box.visible { opacity: 1; }
+        
+        .formula-main {
+            font-size: 1.05rem;
+            font-family: "Times New Roman", Georgia, serif;
+            color: #202124;
+        }
+        
+        .formula-sub {
+            font-size: 0.85rem;
+            font-family: "Times New Roman", Georgia, serif;
+            color: #5f6368;
+            margin-top: 4px;
+        }
+        
+        .formula-expand {
+            font-size: 0.8rem;
+            font-family: "Times New Roman", Georgia, serif;
+            color: #4285f4;
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px dashed #dadce0;
+        }
+        
+        /* 详细说明区 */
+        .explanation-content {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 16px;
+            border: 1px solid #e8eaed;
+            min-height: 380px;
+            max-height: 420px;
+            overflow-y: auto;
+        }
+        
+        .explanation-title {
+            font-size: 1.1rem;
+            color: #202124;
+            margin-bottom: 12px;
+            font-weight: 700;
+            border-bottom: 3px solid #4285f4;
+            padding-bottom: 8px;
+        }
+        
+        .explanation-text {
+            font-size: 0.85rem;
+            color: #3c4043;
+        }
+        
+        .explanation-text p {
+            margin: 5px 0;
+        }
+        
+        .explanation-text .formula-line {
+            font-family: "SF Mono", Monaco, monospace;
+            background: #e8f0fe;
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            color: #4285f4;
+        }
+        
+        .explanation-text .highlight {
+            background: #e6f4ea;
+            padding: 5px 8px;
+            border-radius: 4px;
+            border-left: 3px solid #34a853;
+            color: #137333;
+        }
+        
+        .explanation-text .indent {
+            padding-left: 12px;
+            color: #5f6368;
+        }
+        
+        /* 步骤指示器 */
+        .step-indicators {
+            margin-top: 14px;
+            display: flex;
+            justify-content: center;
+            gap: 5px;
+        }
+        
+        .step-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 4px;
+            background: #dadce0;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .step-dot.active {
+            width: 24px;
+            background: linear-gradient(135deg, #4285f4, #34a853);
+        }
+        
+        .step-dot.passed {
+            background: rgba(66,133,244,0.4);
+        }
+        
+        /* 控制按钮区 */
+        .controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            font-size: 0.85rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s;
+            border: none;
+        }
+        
+        .btn-outline {
+            background: #fff;
+            border: 2px solid #e8eaed;
+            color: #3c4043;
+        }
+        
+        .btn-outline:hover {
+            border-color: #4285f4;
+            color: #4285f4;
+        }
+        
+        .btn-outline:disabled {
+            color: #9aa0a6;
+            cursor: not-allowed;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #4285f4, #1a73e8);
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(66,133,244,0.4);
+        }
+        
+        .btn-primary.playing {
+            background: linear-gradient(135deg, #ea4335, #d93025);
+            box-shadow: 0 4px 14px rgba(234,67,53,0.4);
+        }
+        
+        /* 进度信息 */
+        .progress-info {
+            text-align: center;
+            margin-top: 14px;
+            color: #5f6368;
+            font-size: 0.8rem;
+        }
+        
+        /* 页脚 */
+        .footer {
+            text-align: center;
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid #e8eaed;
+            color: #9aa0a6;
+            font-size: 0.75rem;
+        }
+        
+        .footer a {
+            color: #4285f4;
+            text-decoration: none;
+        }
+        
+        /* 动画 */
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 标题 -->
+        <div class="header">
+            <h1>3D Gaussian Splatting</h1>
+            <h2>Alpha Blending 原理详解 (Front-to-Back)</h2>
+        </div>
+        
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <!-- 左侧：可视化 -->
+            <div class="card">
+                <div class="card-title">🎬 渲染过程可视化</div>
+                
+                <!-- 场景 -->
+                <div class="scene-container">
+                    <!-- 相机 -->
+                    <div class="camera">
+                        <div class="camera-icon">📷</div>
+                        <div class="camera-label">Camera</div>
+                    </div>
+                    
+                    <!-- 光线 -->
+                    <div class="ray"></div>
+                    
+                    <!-- 处理顺序 -->
+                    <div class="order-indicator" id="orderIndicator">
+                        处理顺序: G₁ → G₂ → G₃ (近→远)
+                    </div>
+                    
+                    <!-- 高斯球体 -->
+                    <div class="gaussian gaussian-1" id="g1">
+                        <div class="gaussian-number">1</div>
+                        <div class="gaussian-label">
+                            <div class="name">G₁</div>
+                            <div class="info">最近 | α=0.6</div>
+                        </div>
+                    </div>
+                    
+                    <div class="gaussian gaussian-2" id="g2">
+                        <div class="gaussian-number">2</div>
+                        <div class="gaussian-label">
+                            <div class="name">G₂</div>
+                            <div class="info">中间 | α=0.5</div>
+                        </div>
+                    </div>
+                    
+                    <div class="gaussian gaussian-3" id="g3">
+                        <div class="gaussian-number">3</div>
+                        <div class="gaussian-label">
+                            <div class="name">G₃</div>
+                            <div class="info">最远 | α=0.7</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 深度轴 -->
+                    <div class="depth-axis">
+                        <span>Near</span>
+                        <div class="depth-line"></div>
+                        <span>Far</span>
+                    </div>
+                </div>
+                
+                <!-- 混合结果 -->
+                <div class="result-section">
+                    <div class="result-row">
+                        <div>
+                            <div class="color-label">累积颜色 C</div>
+                            <div class="color-preview" id="colorPreview"></div>
+                        </div>
+                        <div style="flex: 1;">
+                            <div class="color-label">处理状态</div>
+                            <div class="status-indicators">
+                                <div class="status-item g1" id="status1">G₁</div>
+                                <div class="status-item g2" id="status2">G₂</div>
+                                <div class="status-item g3" id="status3">G₃</div>
+                            </div>
+                            <div class="info-grid" id="infoGrid" style="display: none;">
+                                <div class="info-box">
+                                    <div class="label">累积颜色 C</div>
+                                    <div>
+                                        <span class="rgb-r" id="rgbR">0</span>,
+                                        <span class="rgb-g" id="rgbG">0</span>,
+                                        <span class="rgb-b" id="rgbB">0</span>
+                                    </div>
+                                </div>
+                                <div class="info-box">
+                                    <div class="label">各 Tᵢ 值</div>
+                                    <div style="color: #4285f4; font-weight: 600; font-size: 0.65rem;">
+                                        <span id="transmittance">T₁=1</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 公式 -->
+                <div class="formula-box" id="formulaBox">
+                    <div class="formula-main">C = Σᵢ αᵢ · cᵢ · Tᵢ</div>
+                    <div class="formula-sub">其中 Tᵢ = ∏<sub>j&lt;i</sub>(1 - αⱼ)，<strong>T₁ = 1</strong>（空积）</div>
+                    <div class="formula-expand">= α₁c₁ + (1-α₁)α₂c₂ + (1-α₁)(1-α₂)α₃c₃ + ...</div>
+                </div>
+            </div>
+            
+            <!-- 右侧：详细说明 -->
+            <div class="card">
+                <div class="card-title green">📖 详细说明</div>
+                
+                <div class="explanation-content">
+                    <div class="explanation-title" id="expTitle">🎯 什么是 3D Gaussian Splatting?</div>
+                    <div class="explanation-text" id="expText"></div>
+                </div>
+                
+                <!-- 步骤指示器 -->
+                <div class="step-indicators" id="stepIndicators"></div>
+            </div>
+        </div>
+        
+        <!-- 控制按钮 -->
+        <div class="controls">
+            <button class="btn btn-outline" id="prevBtn" onclick="prevStep()">◀ 上一步</button>
+            <button class="btn btn-primary" id="playBtn" onclick="togglePlay()">▶ 自动播放</button>
+            <button class="btn btn-outline" id="nextBtn" onclick="nextStep()">下一步 ▶</button>
+            <button class="btn btn-outline" onclick="resetDemo()">↺ 重置</button>
+        </div>
+        
+        <!-- 进度信息 -->
+        <div class="progress-info">
+            步骤 <span id="currentStep">1</span> / <span id="totalSteps">7</span>
+        </div>
+        
+        <!-- 页脚 -->
+        <div class="footer">
+            3D Gaussian Splatting Alpha Blending 交互演示 | 
+            <a href="https://github.com" target="_blank">GitHub</a>
+        </div>
+    </div>
+
+    <script>
+        // 高斯数据
+        const gaussians = [
+            { color: [66, 133, 244], alpha: 0.6 },   // G1 蓝色
+            { color: [76, 175, 80], alpha: 0.5 },    // G2 绿色
+            { color: [230, 76, 76], alpha: 0.7 }     // G3 红色
+        ];
+        
+        // 字幕内容
+        const subtitles = [
+            {
+                title: "🎯 什么是 3D Gaussian Splatting?",
+                content: `
+                    <p>3D Gaussian Splatting (3DGS) 是一种革命性的3D场景表示和实时渲染方法。</p>
+                    <p></p>
+                    <p><strong>核心思想：</strong>用数百万个3D高斯分布来表示场景，每个高斯具有：</p>
+                    <p class="indent">• <strong>位置 μ ∈ ℝ³</strong> — 高斯中心在3D空间的坐标</p>
+                    <p class="indent">• <strong>颜色 c ∈ ℝ³</strong> — 该高斯的RGB颜色值（通过球谐函数表示）</p>
+                    <p class="indent">• <strong>不透明度 α ∈ [0,1]</strong> — 控制该高斯的不透明程度</p>
+                    <p class="indent">• <strong>协方差 Σ ∈ ℝ³ˣ³</strong> — 决定高斯的3D形状、大小和方向</p>
+                    <p></p>
+                    <p>渲染时，将3D高斯投影（splatting）到2D图像平面，然后通过 <strong>Alpha Blending</strong> 将重叠的高斯混合，得到最终像素颜色。</p>
+                `
+            },
+            {
+                title: "📊 Step 1: 深度排序 (Depth Sorting)",
+                content: `
+                    <p>渲染前的关键步骤：按深度对所有高斯进行排序。</p>
+                    <p></p>
+                    <p class="highlight">⚠️ 重要：3DGS 使用【前向累积】(Front-to-Back) 策略！</p>
+                    <p></p>
+                    <p><strong>排序规则：</strong>按高斯中心到相机的距离，从【近到远】排序</p>
+                    <p></p>
+                    <p>在我们的例子中（按处理顺序）：</p>
+                    <p class="indent">1️⃣ G₁ (蓝色) — 距离相机最近，最先处理</p>
+                    <p class="indent">2️⃣ G₂ (绿色) — 距离中等，第二个处理</p>
+                    <p class="indent">3️⃣ G₃ (红色) — 距离相机最远，最后处理</p>
+                    <p></p>
+                    <p><strong>为什么用 Front-to-Back？</strong></p>
+                    <p class="indent">• 可以提前终止：当累积透射率T接近0时，后面的高斯贡献可忽略</p>
+                    <p class="indent">• 更适合GPU并行计算和内存访问模式</p>
+                `
+            },
+            {
+                title: "📐 Step 2: Alpha Blending 核心公式",
+                content: `
+                    <p>3DGS 使用的是 Volume Rendering 的离散化形式：</p>
+                    <p></p>
+                    <p class="formula-line">C = Σᵢ αᵢ · cᵢ · Tᵢ</p>
+                    <p></p>
+                    <p>其中累积透射率 Tᵢ 定义为：</p>
+                    <p class="formula-line">Tᵢ = ∏ⱼ&lt;ᵢ (1 - αⱼ)</p>
+                    <p></p>
+                    <p class="highlight">💡 关键：T₁ = 1（∏ⱼ&lt;₁ 是空积，空积等于1）</p>
+                    <p></p>
+                    <p><strong>展开形式：</strong></p>
+                    <p class="formula-line">C = α₁c₁ + (1-α₁)α₂c₂ + (1-α₁)(1-α₂)α₃c₃ + ...</p>
+                    <p></p>
+                    <p><strong>符号说明：</strong></p>
+                    <p class="indent">• <strong>C</strong> — 最终像素颜色</p>
+                    <p class="indent">• <strong>cᵢ</strong> — 第 i 个高斯的颜色</p>
+                    <p class="indent">• <strong>αᵢ</strong> — 第 i 个高斯的不透明度</p>
+                    <p class="indent">• <strong>Tᵢ</strong> — 累积透射率（光到达第i个高斯前剩余的能量）</p>
+                `
+            },
+            {
+                title: "🔵 Step 3: 混合第一个高斯 G₁ (蓝色·最近)",
+                content: `
+                    <p>从【最近】的高斯开始处理——这是 Front-to-Back 的核心！</p>
+                    <p></p>
+                    <p><strong>G₁ 参数：</strong></p>
+                    <p class="indent">• 颜色 c₁ = (66, 133, 244)  [蓝色]</p>
+                    <p class="indent">• 不透明度 α₁ = 0.6</p>
+                    <p></p>
+                    <p><strong>计算过程：</strong></p>
+                    <p class="formula-line">T₁ = ∏ⱼ&lt;₁(1-αⱼ) = 1  （空积 = 1，第一个高斯前无遮挡）</p>
+                    <p></p>
+                    <p class="formula-line">贡献₁ = α₁ · c₁ · T₁ = α₁ · c₁ · 1 = α₁c₁</p>
+                    <p class="formula-line">      = 0.6 × (66, 133, 244)</p>
+                    <p class="formula-line">      = (39.6, 79.8, 146.4)</p>
+                    <p></p>
+                    <p class="formula-line">累积颜色 C = (39.6, 79.8, 146.4)</p>
+                    <p></p>
+                    <p class="highlight">💡 注意：T₁=1，所以第一项直接是 α₁c₁，不需要乘任何透射率系数！</p>
+                `
+            },
+            {
+                title: "🟢 Step 4: 混合第二个高斯 G₂ (绿色·中间)",
+                content: `
+                    <p>继续处理第二近的高斯。</p>
+                    <p></p>
+                    <p><strong>G₂ 参数：</strong></p>
+                    <p class="indent">• 颜色 c₂ = (76, 175, 80)  [绿色]</p>
+                    <p class="indent">• 不透明度 α₂ = 0.5</p>
+                    <p></p>
+                    <p><strong>计算过程：</strong></p>
+                    <p class="formula-line">T₂ = ∏ⱼ&lt;₂(1-αⱼ) = (1 - α₁) = (1 - 0.6) = 0.4</p>
+                    <p class="indent">（40% 的光能穿过 G₁ 到达 G₂）</p>
+                    <p></p>
+                    <p class="formula-line">贡献₂ = α₂ · c₂ · T₂ = (1-α₁) · α₂ · c₂</p>
+                    <p class="formula-line">      = 0.4 × 0.5 × (76, 175, 80)</p>
+                    <p class="formula-line">      = (15.2, 35.0, 16.0)</p>
+                    <p></p>
+                    <p class="formula-line">累积颜色 C = (39.6 + 15.2, 79.8 + 35.0, 146.4 + 16.0)</p>
+                    <p class="formula-line">          = (54.8, 114.8, 162.4)</p>
+                    <p></p>
+                    <p class="highlight">💡 展开公式中，这一项是 (1-α₁)α₂c₂</p>
+                `
+            },
+            {
+                title: "🔴 Step 5: 混合第三个高斯 G₃ (红色·最远)",
+                content: `
+                    <p>处理最远的高斯——它受到前面两个高斯的遮挡最多。</p>
+                    <p></p>
+                    <p><strong>G₃ 参数：</strong></p>
+                    <p class="indent">• 颜色 c₃ = (230, 76, 76)  [红色]</p>
+                    <p class="indent">• 不透明度 α₃ = 0.7</p>
+                    <p></p>
+                    <p><strong>计算过程：</strong></p>
+                    <p class="formula-line">T₃ = ∏ⱼ&lt;₃(1-αⱼ) = (1-α₁)(1-α₂) = 0.4 × 0.5 = 0.2</p>
+                    <p class="indent">（只有 20% 的光能穿过 G₁ 和 G₂ 到达 G₃）</p>
+                    <p></p>
+                    <p class="formula-line">贡献₃ = α₃ · c₃ · T₃ = (1-α₁)(1-α₂) · α₃ · c₃</p>
+                    <p class="formula-line">      = 0.2 × 0.7 × (230, 76, 76)</p>
+                    <p class="formula-line">      = (32.2, 10.64, 10.64)</p>
+                    <p></p>
+                    <p class="formula-line">最终颜色 C = (54.8 + 32.2, 114.8 + 10.64, 162.4 + 10.64)</p>
+                    <p class="formula-line">          = (87.0, 125.44, 173.04)</p>
+                    <p></p>
+                    <p class="highlight">💡 展开公式中，这一项是 (1-α₁)(1-α₂)α₃c₃</p>
+                `
+            },
+            {
+                title: "📝 总结：Front-to-Back Alpha Blending",
+                content: `
+                    <p><strong>3DGS 的 Alpha Blending 完整公式：</strong></p>
+                    <p></p>
+                    <p class="formula-line">C = Σᵢ αᵢ · cᵢ · Tᵢ，其中 Tᵢ = ∏ⱼ&lt;ᵢ(1 - αⱼ)，T₁ = 1</p>
+                    <p></p>
+                    <p class="formula-line">展开：C = α₁c₁ + (1-α₁)α₂c₂ + (1-α₁)(1-α₂)α₃c₃ + ...</p>
+                    <p></p>
+                    <p><strong>本例计算结果：</strong></p>
+                    <p class="indent">• G₁ 贡献：α₁c₁ = 0.6×(66,133,244) = <strong>(39.6, 79.8, 146.4)</strong></p>
+                    <p class="indent">• G₂ 贡献：(1-α₁)α₂c₂ = 0.4×0.5×(76,175,80) = <strong>(15.2, 35.0, 16.0)</strong></p>
+                    <p class="indent">• G₃ 贡献：(1-α₁)(1-α₂)α₃c₃ = 0.2×0.7×(230,76,76) = <strong>(32.2, 10.64, 10.64)</strong></p>
+                    <p></p>
+                    <p class="formula-line">最终 C = (87.0, 125.44, 173.04)</p>
+                    <p></p>
+                    <p><strong>关键要点：</strong></p>
+                    <p class="highlight">✅ T₁ = 1（空积等于1，第一个高斯直接乘 α₁c₁）</p>
+                    <p class="highlight">✅ 越远的高斯，Tᵢ 越小，贡献越被衰减</p>
+                    <p class="highlight">✅ 最近的高斯对最终颜色影响最大</p>
+                    <p class="highlight">✅ 可提前终止：当 Tᵢ ≈ 0 时，后续高斯贡献可忽略</p>
+                `
+            }
+        ];
+        
+        // 状态
+        let currentStep = 0;
+        let isPlaying = false;
+        let playInterval = null;
+        const totalSteps = subtitles.length;
+        
+        // 初始化
+        function init() {
+            document.getElementById('totalSteps').textContent = totalSteps;
+            createStepIndicators();
+            updateDisplay();
+        }
+        
+        // 创建步骤指示器
+        function createStepIndicators() {
+            const container = document.getElementById('stepIndicators');
+            container.innerHTML = '';
+            for (let i = 0; i < totalSteps; i++) {
+                const dot = document.createElement('div');
+                dot.className = 'step-dot';
+                dot.onclick = () => goToStep(i);
+                container.appendChild(dot);
+            }
+        }
+        
+        // 计算混合颜色（不含背景色）
+        // C = Σᵢ αᵢ · cᵢ · Tᵢ，其中 T₁ = 1
+        function calculateBlending(activeCount) {
+            let color = [0, 0, 0];
+            let T = 1;  // T₁ = 1（空积）
+            
+            for (let i = 0; i < Math.min(activeCount, gaussians.length); i++) {
+                const g = gaussians[i];
+                // 贡献 = αᵢ × cᵢ × Tᵢ
+                const contribution = g.color.map(c => g.alpha * c * T);
+                color = color.map((c, idx) => c + contribution[idx]);
+                
+                // 更新T为下一个高斯的透射率
+                T *= (1 - g.alpha);
+            }
+            
+            return { color, T };
+        }
+        
+        // 获取活跃的高斯数量
+        function getActiveCount() {
+            if (currentStep < 3) return 0;
+            if (currentStep === 3) return 1;
+            if (currentStep === 4) return 2;
+            if (currentStep >= 5) return 3;
+            return 0;
+        }
+        
+        // 更新显示
+        function updateDisplay() {
+            const activeCount = getActiveCount();
+            const result = calculateBlending(activeCount);
+            
+            // 更新字幕
+            document.getElementById('expTitle').textContent = subtitles[currentStep].title;
+            document.getElementById('expText').innerHTML = subtitles[currentStep].content;
+            
+            // 更新步骤指示器
+            const dots = document.querySelectorAll('.step-dot');
+            dots.forEach((dot, i) => {
+                dot.className = 'step-dot';
+                if (i === currentStep) dot.classList.add('active');
+                else if (i < currentStep) dot.classList.add('passed');
+            });
+            
+            // 更新高斯状态
+            const g1 = document.getElementById('g1');
+            const g2 = document.getElementById('g2');
+            const g3 = document.getElementById('g3');
+            
+            g1.className = 'gaussian gaussian-1';
+            g2.className = 'gaussian gaussian-2';
+            g3.className = 'gaussian gaussian-3';
+            
+            if (activeCount >= 1) g1.classList.add('active');
+            if (activeCount >= 2) g2.classList.add('active');
+            if (activeCount >= 3) g3.classList.add('active');
+            
+            if (currentStep === 3) g1.classList.add('current');
+            if (currentStep === 4) g2.classList.add('current');
+            if (currentStep === 5) g3.classList.add('current');
+            
+            // 更新状态指示器
+            document.getElementById('status1').className = 'status-item g1' + (activeCount >= 1 ? ' active' : '');
+            document.getElementById('status2').className = 'status-item g2' + (activeCount >= 2 ? ' active' : '');
+            document.getElementById('status3').className = 'status-item g3' + (activeCount >= 3 ? ' active' : '');
+            
+            document.getElementById('status1').textContent = activeCount >= 1 ? 'G₁ ✓' : 'G₁';
+            document.getElementById('status2').textContent = activeCount >= 2 ? 'G₂ ✓' : 'G₂';
+            document.getElementById('status3').textContent = activeCount >= 3 ? 'G₃ ✓' : 'G₃';
+            
+            // 更新颜色预览
+            const preview = document.getElementById('colorPreview');
+            if (activeCount > 0) {
+                preview.style.background = `rgb(${Math.round(result.color[0])}, ${Math.round(result.color[1])}, ${Math.round(result.color[2])})`;
+                preview.style.boxShadow = `0 6px 20px rgba(${Math.round(result.color[0])}, ${Math.round(result.color[1])}, ${Math.round(result.color[2])}, 0.5)`;
+            } else {
+                preview.style.background = '#000';
+                preview.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+            }
+            
+            // 更新RGB值和透射率
+            const infoGrid = document.getElementById('infoGrid');
+            if (currentStep >= 3) {
+                infoGrid.style.display = 'grid';
+                document.getElementById('rgbR').textContent = Math.round(result.color[0] * 10) / 10;
+                document.getElementById('rgbG').textContent = Math.round(result.color[1] * 10) / 10;
+                document.getElementById('rgbB').textContent = Math.round(result.color[2] * 10) / 10;
+                
+                // 显示各个T值
+                let tText = 'T₁=1';
+                if (activeCount >= 2) tText += ', T₂=0.4';
+                if (activeCount >= 3) tText += ', T₃=0.2';
+                document.getElementById('transmittance').textContent = tText;
+            } else {
+                infoGrid.style.display = 'none';
+            }
+            
+            // 更新公式和顺序指示器
+            document.getElementById('formulaBox').className = 'formula-box' + (currentStep >= 2 ? ' visible' : '');
+            document.getElementById('orderIndicator').className = 'order-indicator' + (currentStep >= 1 ? ' visible' : '');
+            
+            // 更新进度
+            document.getElementById('currentStep').textContent = currentStep + 1;
+            
+            // 更新按钮状态
+            document.getElementById('prevBtn').disabled = currentStep === 0;
+            document.getElementById('nextBtn').disabled = currentStep === totalSteps - 1;
+        }
+        
+        // 步骤控制
+        function prevStep() {
+            if (currentStep > 0) {
+                currentStep--;
+                updateDisplay();
+            }
+        }
+        
+        function nextStep() {
+            if (currentStep < totalSteps - 1) {
+                currentStep++;
+                updateDisplay();
+            }
+        }
+        
+        function goToStep(step) {
+            currentStep = step;
+            updateDisplay();
+        }
+        
+        function resetDemo() {
+            stopPlay();
+            currentStep = 0;
+            updateDisplay();
+        }
+        
+        // 自动播放
+        function togglePlay() {
+            if (isPlaying) {
+                stopPlay();
+            } else {
+                startPlay();
+            }
+        }
+        
+        function startPlay() {
+            isPlaying = true;
+            document.getElementById('playBtn').textContent = '⏸ 暂停';
+            document.getElementById('playBtn').classList.add('playing');
+            
+            playInterval = setInterval(() => {
+                if (currentStep < totalSteps - 1) {
+                    currentStep++;
+                    updateDisplay();
+                } else {
+                    stopPlay();
+                }
+            }, 5000);
+        }
+        
+        function stopPlay() {
+            isPlaying = false;
+            document.getElementById('playBtn').textContent = '▶ 自动播放';
+            document.getElementById('playBtn').classList.remove('playing');
+            
+            if (playInterval) {
+                clearInterval(playInterval);
+                playInterval = null;
+            }
+        }
+        
+        // 键盘控制
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') prevStep();
+            if (e.key === 'ArrowRight') nextStep();
+            if (e.key === ' ') {
+                e.preventDefault();
+                togglePlay();
+            }
+        });
+        
+        // 初始化
+        init();
+    </script>
+</body>
+</html>
